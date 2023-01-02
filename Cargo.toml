@@ -17,6 +17,7 @@ std = []
 default = ["std"]
 
 [dependencies]
+membarrier = { git = "https://github.com/jeehoonkang/membarrier-rs.git", branch = "pebr" }
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.5.5"

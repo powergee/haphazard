@@ -211,7 +211,7 @@ impl<'domain, F> HazardPointer<'domain, F> {
     {
         self.hazard.protect(ptr as *mut u8);
 
-        crate::asymmetric_light_barrier();
+        membarrier::light();
 
         let ptr2 = src.load(Ordering::Acquire);
         if ptr != ptr2 {

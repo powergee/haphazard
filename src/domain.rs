@@ -563,15 +563,7 @@ impl<F> Domain<F> {
                 // Find all guarded addresses.
                 #[allow(clippy::mutable_key_type)]
                 //XXX: Maybe use a sorted vec to reduce heap allocations, and have O(log(n)) lookups
-                let mut guarded_ptrs = BTreeSet::new();
-                let mut node = self.hazptrs.head.load(Ordering::Acquire);
-                while !node.is_null() {
-                    // Safety: HazPtrRecords are never de-allocated while the domain lives.
-                    let n = unsafe { &*node };
-                    guarded_ptrs.insert(n.ptr.load(Ordering::Acquire));
-                    node = n.next.load(Ordering::Relaxed);
-                }
-
+                let guarded_ptrs = self.collect_guarded_ptrs();
                 let (nreclaimed, is_done) =
                     self.match_reclaim_untagged(stolen_heads, &guarded_ptrs);
                 done = is_done;
@@ -590,6 +582,20 @@ impl<F> Domain<F> {
         }
         self.nbulk_reclaims.fetch_sub(1, Ordering::Acquire);
         total_reclaimed
+    }
+
+    #[inline]
+    #[allow(clippy::mutable_key_type, missing_docs)]
+    pub fn collect_guarded_ptrs(&self) -> BTreeSet<*mut u8> {
+        let mut guarded_ptrs = BTreeSet::new();
+        let mut node = self.hazptrs.head.load(Ordering::Acquire);
+        while !node.is_null() {
+            // Safety: HazPtrRecords are never de-allocated while the domain lives.
+            let n = unsafe { &*node };
+            guarded_ptrs.insert(n.ptr.load(Ordering::Acquire));
+            node = n.next.load(Ordering::Relaxed);
+        }
+        guarded_ptrs
     }
 
     fn match_reclaim_untagged(

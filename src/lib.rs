@@ -142,6 +142,7 @@ mod hazard;
 mod pointer;
 mod record;
 mod sync;
+mod local;
 
 /// Raw building blocks for managing hazard pointers.
 pub mod raw {
@@ -164,6 +165,7 @@ pub use domain::Domain;
 pub use domain::Global;
 pub use domain::Singleton;
 pub use hazard::{HazardPointer, HazardPointerArray};
+pub use local::retire_locally;
 
 /// A managed pointer type which can be safely shared between threads.
 ///

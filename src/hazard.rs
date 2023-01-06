@@ -3,7 +3,32 @@ use crate::{record::HazPtrRecord, Domain};
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::NonNull;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{Ordering, fence};
+use core::mem;
+
+#[inline]
+pub fn low_bits<T>() -> usize {
+    (1 << mem::align_of::<T>().trailing_zeros()) - 1
+}
+
+#[inline]
+pub fn ptr_with_tag<T>(ptr: *mut T, tag: usize) -> *mut T {
+    ((ptr as usize & !low_bits::<T>()) | (tag & low_bits::<T>())) as *mut T
+}
+
+#[inline]
+pub fn decompose_ptr<T>(ptr: *mut T) -> (*mut T, usize) {
+    let ptr = ptr as usize;
+    let raw = (ptr & !low_bits::<T>()) as *mut T;
+    let tag = ptr & low_bits::<T>();
+    (raw, tag)
+}
+
+#[inline]
+// Extract an actual address out of a tagged pointer
+pub fn remove_tag<T>(ptr: *mut T) -> *mut T {
+    decompose_ptr(ptr).0
+}
 
 #[cfg(doc)]
 use crate::*;
@@ -48,6 +73,11 @@ impl HazardPointer<'static, crate::Global> {
     pub fn many<const N: usize>() -> HazardPointerArray<'static, crate::Global, N> {
         HazardPointer::many_in_domain(Domain::global())
     }
+}
+
+pub enum ProtectError<T> {
+    Stopped,
+    Changed(*mut T)
 }
 
 impl<'domain, F> HazardPointer<'domain, F> {
@@ -244,6 +274,53 @@ impl<'domain, F> HazardPointer<'domain, F> {
         F: 'static,
     {
         self.hazard.protect(ptr as *mut u8);
+    }
+
+    #[allow(missing_docs)]
+    pub fn protect_pp<'l, S, T, F1, F2>(
+        &'l mut self,
+        src: &S,
+        src_link: &F1,
+        check_stop: &F2,
+    ) -> Result<*mut T, ()>
+    where
+        F: 'static,
+        F1: Fn(&S) -> &AtomicPtr<T>,
+        F2: Fn(&S) -> bool
+    {
+        let mut ptr = remove_tag(src_link(src).load(Ordering::Acquire));
+        loop {
+            match self.try_protect_pp(ptr, src, src_link, check_stop) {
+                Ok(result) => return Ok(result),
+                Err(ProtectError::Changed(ptr_new)) => ptr = ptr_new,
+                Err(ProtectError::Stopped) => return Err(())
+            }
+        }
+    }
+
+    #[allow(missing_docs)]
+    pub fn try_protect_pp<'l, T, S, F1, F2>(
+        &'l mut self,
+        ptr: *mut T,
+        src: &S,
+        src_link: &F1,
+        check_stop: &F2,
+    ) -> Result<*mut T, ProtectError<T>>
+    where
+        F: 'static,
+        F1: Fn(&S) -> &AtomicPtr<T>,
+        F2: Fn(&S) -> bool
+    {
+        self.protect_raw(ptr);
+        membarrier::light();
+        if check_stop(src) {
+            return Err(ProtectError::Stopped);
+        }
+        let ptr_new = remove_tag(src_link(src).load(Ordering::Acquire));
+        if ptr == ptr_new {
+            return Ok(ptr);
+        }
+        Err(ProtectError::Changed(ptr_new))
     }
 }
 

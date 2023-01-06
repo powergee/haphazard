@@ -165,7 +165,7 @@ pub use domain::Domain;
 pub use domain::Global;
 pub use domain::Singleton;
 pub use hazard::{HazardPointer, HazardPointerArray};
-pub use local::retire_locally;
+pub use local::{retire_locally, try_unlink};
 
 /// A managed pointer type which can be safely shared between threads.
 ///
